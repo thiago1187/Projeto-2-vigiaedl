@@ -11,6 +11,13 @@ from core import espacial as e
 from core.visual import CORES_CALOR, ROTULOS_CALOR, classe_calor, fmt
 
 CENTRO_RECIFE = (-8.045, -34.92)
+ZOOM_RECIFE = 12
+
+
+def centro_do_mapa(ds_geo) -> tuple[float, float]:
+    """Centro dos distritos (lat, lon)."""
+    x0, y0, x1, y1 = ds_geo.total_bounds
+    return ((y0 + y1) / 2, (x0 + x1) / 2)
 
 
 def imagem_kde(grade: e.Grade, passo_graus: float = 0.0008, percentis=(2, 98)):
@@ -31,8 +38,8 @@ def construir_mapa(ds_geo, metrica_ds: pd.Series, rotulo_metrica: str, ovt: pd.D
                    mostrar_ovt: bool = True, mostrar_edl: bool = True, mostrar_raio: bool = True,
                    destaques: set | None = None) -> folium.Map:
     # fit_bounds dispara com o iframe ainda sem altura e enquadra mal; centro e zoom fixos funcionam sempre.
-    x0, y0, x1, y1 = ds_geo.total_bounds
-    m = folium.Map(location=((y0 + y1) / 2, (x0 + x1) / 2), zoom_start=11.7, tiles="cartodbpositron", control_scale=True)
+    # Mapa-base do OpenStreetMap: o "cartodbpositron" passou a exigir chave de API.
+    m = folium.Map(location=centro_do_mapa(ds_geo), zoom_start=ZOOM_RECIFE, tiles="OpenStreetMap", control_scale=True)
 
     # Distritos coloridos pela métrica escolhida
     vals = metrica_ds.dropna()

@@ -20,7 +20,7 @@ from streamlit_folium import st_folium
 from core import analise as an
 from core import espacial as esp
 from core.dados import carregar_processados, ler_instalacao_edl
-from core.mapa import CENTRO_RECIFE, construir_mapa, imagem_kde, legenda_calor_html
+from core.mapa import ZOOM_RECIFE, centro_do_mapa, construir_mapa, imagem_kde, legenda_calor_html
 from core.visual import (AZUL, CINZA, CORES_CALOR, CSS, LARANJA, QUEBRAS, TINTA, cartao, fmt, limitacao)
 
 NOMES_OBS = {"F": "fechada", "E": "extraviada", "R": "recusada", "D": "desocupada", "REC": "recuperada"}
@@ -276,7 +276,9 @@ with tab1:
         mapa = construir_mapa(ds_geo, ind[metricas[nome_m]], nome_m, ovt, media_ovt, edl, float(raio),
                               imagem=kde["rgba"] if kde else None, limites=kde["limites"] if kde else None,
                               mostrar_ovt=mostrar_ovt, mostrar_edl=mostrar_edl, mostrar_raio=mostrar_raio, destaques=atip)
-        st_folium(mapa, height=600, use_container_width=True, returned_objects=[], key="mapa_geral")
+        centro = centro_do_mapa(ds_geo)
+        st_folium(mapa, height=640, use_container_width=True, returned_objects=[], key="mapa_geral",
+                  center=centro, zoom=ZOOM_RECIFE)
         st.markdown(legenda_calor_html(), unsafe_allow_html=True)
         st.caption("Pontos com borda vermelha têm alguma leitura 10 vezes acima da mediana do bairro: vale conferir antes de tratar como foco.")
 
@@ -355,7 +357,7 @@ with tab2:
         else:
             st.markdown('<div class="info"><b>Sem padrão fora do comum</b><p>Nenhuma leitura desta OVT passou de 10 vezes a mediana do bairro.</p></div>', unsafe_allow_html=True)
         if not info.empty:
-            mini = folium.Map(location=(info["lat"].iloc[0], info["lon"].iloc[0]), zoom_start=15, tiles="cartodbpositron")
+            mini = folium.Map(location=(info["lat"].iloc[0], info["lon"].iloc[0]), zoom_start=15, tiles="OpenStreetMap")
             folium.Circle((info["lat"].iloc[0], info["lon"].iloc[0]), radius=float(raio), color=AZUL, weight=1, fill=True, fill_opacity=0.05).add_to(mini)
             folium.CircleMarker((info["lat"].iloc[0], info["lon"].iloc[0]), radius=6, color=TINTA, fill=True, fill_color=LARANJA, fill_opacity=1, tooltip=sel).add_to(mini)
             prox = info["edl_mais_proxima"].iloc[0]
@@ -363,7 +365,8 @@ with tab2:
                 e_ = edl[edl["edl_id"] == prox].iloc[0]
                 folium.CircleMarker((e_["lat"], e_["lon"]), radius=6, color=AZUL, fill=True, fill_color=AZUL, tooltip=f"EDL mais próxima · {e_['tipo']}").add_to(mini)
             st.markdown("**Localização**")
-            st_folium(mini, height=240, use_container_width=True, returned_objects=[], key="mini_mapa")
+            st_folium(mini, height=240, use_container_width=True, returned_objects=[], key="mini_mapa",
+                      center=(info["lat"].iloc[0], info["lon"].iloc[0]), zoom=15)
     with a2:
         st.markdown("**Últimas leituras**")
         ult = h.sort_values(["ano", "ciclo"], ascending=False).head(12).copy()
