@@ -6,6 +6,3 @@ textColor = "#0F1B2D"
 
 [browser]
 gatherUsageStats = false
-
-[server]
-fileWatcherType = "none"
