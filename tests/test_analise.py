@@ -85,3 +85,24 @@ def test_filtrar_leituras():
     assert len(a.filtrar_leituras(l, ciclos=(2, 3))) == 14
     assert len(a.filtrar_leituras(l, anos=2025)) == 0
     assert len(a.filtrar_leituras(l, ds=2)) == 0 and len(a.filtrar_leituras(l, ds="todos")) == len(l)
+
+
+def test_corte_proprio_de_cada_ovt_usa_a_data_da_edl_do_raio():
+    edl = pd.DataFrame({"edl_id": ["E1", "E2"], "tipo": ["Outros"] * 2, "x": [0.0, 5000.0], "y": [0.0, 0.0]})
+    inst = pd.DataFrame({"edl_id": ["E1", "E2"], "data_instalacao": pd.to_datetime(["2026-02-15", "2026-03-15"])})
+    ovt = pd.DataFrame({"id_ovt": ["A", "B", "C"], "ds": 1, "posicao_validada": True,
+                        "x": [50.0, 5100.0, 2500.0], "y": [0.0, 0.0, 0.0]})     # A perto de E1, B perto de E2, C longe
+    oc = a.classificar_ovts(ovt, edl, 200, instalacao=inst)
+    assert oc.loc[0, "corte_edl"] == pd.Timestamp("2026-02-15") and oc.loc[1, "corte_edl"] == pd.Timestamp("2026-03-15")
+    assert pd.isna(oc.loc[2, "corte_edl"])
+    l = pd.DataFrame([{"id_ovt": i, "ds": 1, "ano": 2026, "ciclo": c, "data": pd.Timestamp("2026-01-01") + pd.Timedelta(days=30 * c), "n_ovos": 10}
+                      for i in "ABC" for c in (1, 2, 3)])    # datas: 31/01, 02/03, 01/04
+    b = a.base_por_ovt(l, oc, corte="2026-03-01", minimo_leituras=1, corte_proprio=True)
+    per = b.set_index(["id_ovt", "periodo"]).index
+    assert ("A", "antes") in per and ("A", "depois") in per        # A: corte 15/02 -> 31/01 antes; 02/03 e 01/04 depois
+    assert ("B", "antes") in per and ("B", "depois") in per        # B: corte 15/03 -> 31/01 e 02/03 antes; 01/04 depois
+    assert ("C", "antes") in per and ("C", "depois") in per        # C (longe): corte único 01/03
+    n = lambda i, p: int(b[(b.id_ovt == i) & (b.periodo == p)]["n_leituras"].iloc[0])
+    assert (n("A", "antes"), n("A", "depois")) == (1, 2)
+    assert (n("B", "antes"), n("B", "depois")) == (2, 1)
+    assert (n("C", "antes"), n("C", "depois")) == (1, 2)          # 31/01 antes; 02/03 e 01/04 depois do corte único de 01/03

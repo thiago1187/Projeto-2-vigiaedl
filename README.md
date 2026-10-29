@@ -4,7 +4,7 @@ Painel em Streamlit para acompanhar as ovitrampas (OVTs) do Recife e avaliar se 
 
 ## Status
 
-Funcionando com os dados de 2024 a 2026. A comparação **antes × depois** já está pronta no código, mas só liga quando a GEVACZ mandar a data de instalação de cada EDL (hoje dá para testar com uma data de corte hipotética). Dados de anos anteriores (2018 em diante) entram sem mexer no código: basta colocar a pasta "OVITRAMPAS AAAA" junto das outras e rodar a preparação de novo.
+Funcionando com os dados de 2024 a 2026, sempre organizado por Distrito Sanitário (DS). O antes × depois já está pronto no código e liga sozinho quando a GEVACZ mandar a data de instalação de cada EDL; hoje dá para testar com uma data de corte hipotética. Dados de anos anteriores entram sem mexer no código (veja "Como entram anos anteriores").
 
 ## As três telas
 
@@ -16,25 +16,46 @@ Funcionando com os dados de 2024 a 2026. A comparação **antes × depois** já 
 
 ```bash
 pip install -r requirements.txt
-
-# 1) Trata os dados enviados pela GEVACZ (pasta já extraída)
-python scripts/preparar_dados.py --origem "<pasta INFORMAÇÕES - GEVACZ>" --destino data/processed
-
-# 2) Sobe o painel
 streamlit run app.py
+```
+
+Os dados tratados já estão em `data/processed/`. Só é preciso rodar a preparação quando chegar dado novo da GEVACZ:
+
+```bash
+python scripts/preparar_dados.py --origem "<pasta INFORMAÇÕES - GEVACZ>" --destino data/processed
 ```
 
 Para ler os dados tratados de outro lugar, defina `VIGIAEDL_DADOS` com o caminho da pasta. Os testes rodam com `pytest`.
 
-## Dados (e por que não estão aqui)
+## Dados
 
-Os dados da GEVACZ são georreferenciados e **não ficam neste repositório**, que é público. As pastas `data/raw/` e `data/processed/` estão no `.gitignore`. O tratamento também descarta nome e endereço dos estabelecimentos das EDLs.
+Os dados vêm do monitoramento de ovitrampas da GEVACZ (Prefeitura do Recife), usados com acordo da GEVACZ. O repositório guarda só os **dados tratados** em `data/processed/` (para o painel rodar online). Os arquivos brutos (planilhas, shapefiles, `.rar`) ficam fora, no `.gitignore`. O tratamento também descarta nome e endereço dos estabelecimentos das EDLs.
+
+### Como entram anos anteriores (2018 em diante)
+
+1. Coloque as pastas `OVITRAMPAS 2018`, `OVITRAMPAS 2019` etc. junto das atuais, dentro da pasta da GEVACZ.
+2. Rode de novo `python scripts/preparar_dados.py --origem "<pasta GEVACZ>" --destino data/processed`.
+3. Faça commit de `data/processed/`. O seletor de ano, o ano a ano por DS e o antes × depois passam a usar os novos anos.
+
+### Quando a GEVACZ mandar a data de instalação das EDLs
+
+Preencha `data/processed/edl_instalacao_modelo.csv` (colunas `edl_id` e `data_instalacao`, no formato dd/mm/aaaa), salve como `data/processed/edl_instalacao.csv` e faça commit. O painel passa a oferecer duas formas de definir antes e depois: a data da EDL de cada OVT (recomendada) ou uma data única (a menor, regra do plano). Pode preencher só parte das EDLs.
+
+### Correções que o tratamento faz
+
+- IDs de OVT padronizados; IDs do DS II reconstruídos pela ordem do arquivo só quando a contagem bate (e conferidos com a planilha de coordenadas).
+- Pontos fora de Recife e duplicados removidos.
+- **Datas com ano digitado errado** (ex.: dezembro de 2024 escrito como 2025, ou ano 0001) são corrigidas pelo ciclo. A data original fica em `data_original`; o relatório de qualidade conta quantas mudaram.
+
+## Deploy (Streamlit Community Cloud)
+
+Repositório público, branch `main`, arquivo principal `app.py`. Não precisa de segredos. Se a tabela de leituras crescer muito, o painel pode ficar pesado no plano gratuito.
 
 ## Regras de negócio (em `core/espacial.py`)
 
 - **Distância:** sempre em metros, no sistema SIRGAS 2000 / UTM 25S (EPSG:31985). Mapas usam EPSG:4326.
 - **Perto × longe:** distância até a EDL mais próxima menor ou igual ao raio (200 m por padrão; o painel deixa escolher 100, 200, 300 ou 500 m). Exatamente no limite conta como perto.
-- **Antes × depois:** corte na data de instalação (leitura em data anterior ao corte é "antes"; no dia ou depois é "depois"). Sem a data de instalação, não existe corte.
+- **Antes × depois:** a leitura em data anterior ao corte é "antes"; no dia do corte ou depois é "depois". Com a data de instalação de cada EDL, as OVTs perto usam a data da EDL do próprio raio e as OVTs longe (comparação) usam uma data única; também dá para usar uma data única para todas (a menor, regra do plano). Sem data de instalação, não existe corte.
 - **Unidade da comparação:** a média de ovos de cada OVT (não cada leitura), com mínimo de 3 leituras, para não contar a mesma armadilha várias vezes. Teste de Mann-Whitney, com diferença em % entre as medianas. O antes × depois usa diferença das diferenças.
 - **Leitura sem contagem** (F fechada, E extraviada, R recusada, D desocupada) não entra como zero. REC = recuperada.
 - **Kernel Density:** gaussiano, com suavização ajustável (padrão 300 m). Dois modos: nível de infestação (média de ovos por OVT, não depende de quantas armadilhas há) e concentração (ovos por km²).

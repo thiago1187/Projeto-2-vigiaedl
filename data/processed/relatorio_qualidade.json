@@ -1,0 +1,78 @@
+{
+  "arquivos_sem_id_recuperavel": [
+    "DS 2 / torroes (3 pontos)"
+  ],
+  "pontos_lidos": 3204,
+  "pontos_fora_do_recife": [
+    "VAR4219",
+    "VAR4220"
+  ],
+  "pontos_com_id_invalido": 0,
+  "ids_repetidos": 340,
+  "ids_com_posicao_conflitante": [],
+  "reconstruidos_validados": [
+    "Mangueira",
+    "agua_fria",
+    "alto_santa_terezinha",
+    "arruda",
+    "beberibe",
+    "bomba_do_hemeterio",
+    "hipodromo",
+    "linha_do_tiro",
+    "ponto_de_parada",
+    "rosarinho"
+  ],
+  "reconstruidos_nao_validados": [
+    "cajueiro",
+    "campina_do_barreto",
+    "campo_grande",
+    "fundao",
+    "peixinhos",
+    "porto_da_madeira"
+  ],
+  "n_pontos_nao_validados": 138,
+  "pontos_em_pasta_de_outro_ds": 0,
+  "pontos_fora_do_ds_oficial": 6,
+  "anos_com_leituras": [
+    2024,
+    2025,
+    2026
+  ],
+  "datas_corrigidas": 12604,
+  "datas_corrigidas_por_ano": {
+    "2024": 4655,
+    "2025": 7934,
+    "2026": 15
+  },
+  "edl_instalacao_preenchida": false,
+  "leituras_por_ano": {
+    "2024": 60298,
+    "2025": 60652,
+    "2026": 31455
+  },
+  "leituras_com_ovos": 143267,
+  "ovts_com_leitura_sem_ponto": 287,
+  "ovts_com_leitura": 3149,
+  "ovts_com_ponto": 2862,
+  "edl_pontos": 372,
+  "ds_area_km2_calculada": {
+    "1": 15.25,
+    "2": 14.81,
+    "3": 18.13,
+    "4": 42.09,
+    "5": 29.91,
+    "6": 24.92,
+    "7": 60.77,
+    "8": 17.26
+  },
+  "ds_area_km2_oficial": {
+    "1": 15.25,
+    "2": 14.81,
+    "3": 18.13,
+    "4": 42.09,
+    "5": 29.91,
+    "6": 24.92,
+    "7": 60.77,
+    "8": 17.26
+  }
+}

@@ -1,6 +1,6 @@
-# Dados da GEVACZ não vão para o repositório (georreferenciados; ver README)
+# Arquivos brutos enviados pela GEVACZ (planilhas, shapefiles, .rar) ficam fora.
+# Só os dados tratados (data/processed) vão para o repositório, para o painel rodar online.
 data/raw/
-data/processed/
 *.rar
 __pycache__/
 .pytest_cache/

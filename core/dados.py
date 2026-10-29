@@ -414,6 +414,56 @@ def ler_ovt_pontos(base: str | Path, leituras_2026: pd.DataFrame, ds_poligonos: 
 # --------------------------------------------------------------------------
 # Orquestração
 # --------------------------------------------------------------------------
+def corrigir_datas_por_ciclo(leituras: pd.DataFrame, tolerancia_dias: int = 45, passo_dias: int = 14):
+    """Conserta o ano de datas digitadas errado, usando o próprio ciclo como referência.
+
+    Nos arquivos da GEVACZ aparecem datas como 2025-12-16 no ciclo 23 de 2024 (o certo é 2024-12-16),
+    ano 0001 ou 2037. A coleta de um ciclo acontece toda numa janela curta, então:
+      1. andando ciclo a ciclo, a data esperada é a do ciclo anterior + `passo_dias`;
+      2. de cada data usamos só dia e mês, e escolhemos o ano (o da planilha ou o seguinte, para a virada
+         de dezembro para janeiro) que deixa a data mais perto da esperada;
+      3. a data de referência do ciclo é a mediana disso; leitura a mais de `tolerancia_dias` dela
+         recebe a data de referência do ciclo.
+    Datas ausentes continuam ausentes. A data original fica em `data_original`.
+    Devolve (leituras corrigidas, resumo).
+    """
+    df = leituras.copy()
+    original = pd.to_datetime(df["data"], errors="coerce")
+    df["data_original"] = original
+    nova = original.copy()
+    for ano, g in df.groupby("ano"):
+        anterior = None
+        for ciclo in sorted(g["ciclo"].dropna().unique()):
+            idx = g.index[g["ciclo"] == ciclo]
+            d = original.loc[idx]
+            ok = d.notna()
+            esperada = None if anterior is None else anterior + pd.Timedelta(days=passo_dias)
+            if esperada is None:                                    # ciclo 1: datas que já estão no ano certo
+                no_ano = d[ok & (d.dt.year == ano)]
+                esperada = no_ano.median() if len(no_ano) else pd.NaT
+            if pd.isna(esperada):
+                continue
+            cand = {}
+            for y in (int(ano), int(ano) + 1):
+                cand[y] = pd.to_datetime(
+                    {"year": y, "month": d[ok].dt.month, "day": d[ok].dt.day}, errors="coerce")
+            dist = pd.DataFrame({y: (c - esperada).abs() for y, c in cand.items()}).fillna(pd.Timedelta(days=9999))
+            melhor_ano = dist.idxmin(axis=1)
+            escolhida = pd.Series(
+                [cand[y].iloc[i] for i, y in enumerate(melhor_ano)], index=d[ok].index)
+            ref = escolhida.dropna().median() if escolhida.notna().any() else esperada
+            longe = (escolhida - ref).abs() > pd.Timedelta(days=tolerancia_dias)
+            escolhida[longe | escolhida.isna()] = ref
+            nova.loc[escolhida.index] = escolhida
+            anterior = ref
+    df["data"] = nova
+    mudou = (nova != original) & (nova.notna() | original.notna())
+    df["data_corrigida"] = mudou.fillna(False)
+    resumo = {"datas_corrigidas": int(df["data_corrigida"].sum()),
+              "datas_corrigidas_por_ano": df.groupby("ano")["data_corrigida"].sum().astype(int).to_dict()}
+    return df, resumo
+
+
 def preparar_tudo(origem: str | Path, destino: str | Path) -> dict:
     """Lê a pasta da GEVACZ e grava as tabelas limpas em `destino`."""
     base = achar_pasta_base(origem)
@@ -434,6 +484,9 @@ def preparar_tudo(origem: str | Path, destino: str | Path) -> dict:
     bairro_por_id = ovt.set_index("id_ovt")["bairro"]
     leituras["bairro"] = leituras["id_ovt"].map(bairro_por_id).fillna(leituras["bairro"])
 
+    # Datas com ano digitado errado (ver a função): corrige pelo ciclo e conta o que mudou.
+    leituras, resumo_datas = corrigir_datas_por_ciclo(leituras)
+
     leituras.to_csv(destino / "leituras.csv", index=False)
     ovt.to_csv(destino / "ovt_pontos.csv", index=False)
     edl.drop(columns="geometry").to_csv(destino / "edl_pontos.csv", index=False)
@@ -444,6 +497,7 @@ def preparar_tudo(origem: str | Path, destino: str | Path) -> dict:
 
     rel.update({
         "anos_com_leituras": anos,
+        **resumo_datas,
         "edl_instalacao_preenchida": (destino / "edl_instalacao.csv").exists(),
         "leituras_por_ano": leituras.groupby("ano").size().astype(int).to_dict(),
         "leituras_com_ovos": int(leituras["n_ovos"].notna().sum()),
@@ -492,10 +546,16 @@ def ler_instalacao_edl(pasta: str | Path) -> pd.DataFrame | None:
 def carregar_processados(pasta: str | Path):
     """Lê o que preparar_tudo gravou. É isto que o app usa."""
     pasta = Path(pasta)
-    leituras = pd.read_csv(pasta / "leituras.csv", low_memory=False)
+    # Só as colunas que o painel usa, em tipos menores: com vários anos de dados a tabela passa de meio milhão de linhas.
+    usar = {"ano", "ciclo", "ds", "bairro", "id_ovt", "data", "data_original", "data_corrigida", "n_ovos", "obs", "obs_cod",
+            "dt_leitura", "dt_dig", "dt_envio_ds"}
+    leituras = pd.read_csv(pasta / "leituras.csv", low_memory=False, usecols=lambda c: c in usar,
+                           dtype={"ano": "int16", "ciclo": "int16"})
     # Converte uma a uma: coluna que vem toda vazia (as datas de laboratório só existem em 2026)
     # seria lida como texto e quebraria as contas de prazo.
-    for c in ["data", "dt_entrega_apoio", "dt_entrega_lab", "dt_leitura", "dt_dig", "dt_envio_ds"]:
+    for c in ["data", "data_original", "dt_leitura", "dt_dig", "dt_envio_ds"]:
+        if c not in leituras:
+            continue
         leituras[c] = pd.to_datetime(leituras[c], errors="coerce")
     ovt = pd.read_csv(pasta / "ovt_pontos.csv")
     edl = pd.read_csv(pasta / "edl_pontos.csv")

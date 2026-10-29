@@ -108,3 +108,46 @@ def test_instalacao_edl_so_existe_quando_a_gevacz_manda(tmp_path):
     r = d.ler_instalacao_edl(tmp_path)
     assert list(r["edl_id"]) == ["DS1-1"]                                # linha sem data some
     assert r["data_instalacao"].iloc[0] == pd.Timestamp("2024-03-15")    # dia/mês/ano
+
+
+# --- datas com ano digitado errado -----------------------------------------------------------------
+def _ciclos(datas_por_ciclo, ano=2024):
+    linhas = []
+    for ciclo, datas in datas_por_ciclo.items():
+        for i, d in enumerate(datas):
+            linhas.append({"ano": ano, "ciclo": ciclo, "id_ovt": f"X{i}", "data": pd.Timestamp(d) if d else pd.NaT})
+    return pd.DataFrame(linhas)
+
+
+def test_ano_digitado_errado_e_corrigido_pelo_ciclo():
+    from core.dados import corrigir_datas_por_ciclo
+    # ciclo 2 foi digitado com 2025 em vez de 2024
+    df = _ciclos({1: ["2024-01-15"] * 5, 2: ["2025-01-29"] * 5})
+    out, r = corrigir_datas_por_ciclo(df)
+    assert set(out.loc[out.ciclo == 2, "data"]) == {pd.Timestamp("2024-01-29")}
+    assert out.loc[out.ciclo == 2, "data_corrigida"].all() and not out.loc[out.ciclo == 1, "data_corrigida"].any()
+    assert r["datas_corrigidas"] == 5
+    assert set(out.loc[out.ciclo == 2, "data_original"]) == {pd.Timestamp("2025-01-29")}   # a original fica guardada
+
+
+def test_virada_de_ano_verdadeira_nao_e_mexida():
+    from core.dados import corrigir_datas_por_ciclo
+    df = _ciclos({1: ["2024-11-18"] * 4, 2: ["2024-12-02"] * 4, 3: ["2025-01-02"] * 4})
+    out, r = corrigir_datas_por_ciclo(df)
+    assert set(out.loc[out.ciclo == 3, "data"]) == {pd.Timestamp("2025-01-02")}
+    assert r["datas_corrigidas"] == 0
+
+
+def test_data_fora_do_ciclo_recebe_a_data_do_ciclo_e_ausente_continua_ausente():
+    from core.dados import corrigir_datas_por_ciclo
+    df = _ciclos({1: ["2024-01-15"] * 5, 2: ["2024-01-29"] * 4 + ["2024-08-15"], 3: ["2024-02-08"] * 4 + [None]})
+    out, _ = corrigir_datas_por_ciclo(df)
+    assert (out.loc[out.ciclo == 2, "data"] == pd.Timestamp("2024-01-29")).all()   # o 15/08 virou a data do ciclo
+    assert out.loc[out.ciclo == 3, "data"].isna().sum() == 1                      # sem data, segue sem data
+
+
+def test_ano_absurdo_vira_o_ano_do_ciclo():
+    from core.dados import corrigir_datas_por_ciclo
+    df = _ciclos({1: ["2024-01-15"] * 5, 2: ["2024-01-29"] * 4 + ["2037-01-29"]})
+    out, _ = corrigir_datas_por_ciclo(df)
+    assert (out.loc[out.ciclo == 2, "data"] == pd.Timestamp("2024-01-29")).all()

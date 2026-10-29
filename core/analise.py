@@ -7,14 +7,23 @@ import pandas as pd
 from core import espacial as e
 
 
-def classificar_ovts(ovt: pd.DataFrame, edl: pd.DataFrame, raio_m: float = e.RAIO_PADRAO_M) -> pd.DataFrame:
-    """Acrescenta à tabela de OVTs: distância e identificação da EDL mais próxima, e perto/longe."""
+def classificar_ovts(ovt: pd.DataFrame, edl: pd.DataFrame, raio_m: float = e.RAIO_PADRAO_M,
+                     instalacao: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Acrescenta à tabela de OVTs: distância e identificação da EDL mais próxima, e perto/longe.
+
+    Com `instalacao` (edl_id, data_instalacao), acrescenta também `corte_edl`: a data de instalação mais
+    antiga entre as EDLs dentro do raio da OVT, que é o "antes/depois" próprio daquela OVT.
+    """
     d, pos = e.distancia_ate_edl_mais_proxima(ovt["x"], ovt["y"], edl["x"], edl["y"])
     out = ovt.copy()
     out["dist_edl_m"] = d
     out["edl_mais_proxima"] = np.where(pos >= 0, edl["edl_id"].to_numpy()[np.clip(pos, 0, None)], None)
     out["tipo_edl_mais_proxima"] = np.where(pos >= 0, edl["tipo"].to_numpy()[np.clip(pos, 0, None)], None)
     out["proximidade"] = e.classificar_proximidade(d, raio_m)
+    if instalacao is not None and len(instalacao):
+        datas_edl = edl["edl_id"].map(instalacao.drop_duplicates("edl_id").set_index("edl_id")["data_instalacao"])
+        out["corte_edl"], out["n_edl_no_raio"] = e.primeira_instalacao_no_raio(
+            ovt["x"], ovt["y"], edl["x"], edl["y"], datas_edl, raio_m)
     return out
 
 
@@ -35,18 +44,29 @@ def filtrar_leituras(leituras: pd.DataFrame, anos=None, ciclos=None, ds=None, de
 
 
 def base_por_ovt(leituras: pd.DataFrame, ovt_class: pd.DataFrame, corte=None,
-                 apenas_validadas: bool = False, minimo_leituras: int = 3) -> pd.DataFrame:
+                 apenas_validadas: bool = False, minimo_leituras: int = 3,
+                 corte_proprio: bool = False) -> pd.DataFrame:
     """Uma linha por OVT (e por período, se houver corte) com a média de ovos e o grupo perto/longe.
 
     OVTs sem coordenada ficam de fora (não dá para dizer se estão perto ou longe).
     `apenas_validadas` tira as OVTs cuja posição foi reconstruída e não pôde ser conferida.
+    `corte_proprio`: as OVTs "perto" usam a data de instalação da própria EDL (coluna `corte_edl`);
+    as "longe" (e as perto sem data conhecida) usam `corte`.
     """
     cols = ["id_ovt", "proximidade", "dist_edl_m", "posicao_validada"]
+    if corte_proprio and "corte_edl" in ovt_class:
+        cols.append("corte_edl")
     l = leituras.merge(ovt_class[cols], on="id_ovt", how="inner")
     l = l[l["proximidade"].isin(["perto", "longe"])]
     if apenas_validadas:
         l = l[l["posicao_validada"]]
-    l = l.assign(periodo=e.classificar_periodo(l["data"], corte).to_numpy())
+    if corte_proprio and "corte_edl" in l:
+        c = l["corte_edl"].where(l["proximidade"] == "perto").fillna(pd.Timestamp(corte) if corte is not None else pd.NaT)
+        d = pd.to_datetime(l["data"], errors="coerce")
+        periodo = np.where(d.isna(), "sem_data", np.where(c.isna(), "sem_corte", np.where(d < c, "antes", "depois")))
+        l = l.assign(periodo=periodo)
+    else:
+        l = l.assign(periodo=e.classificar_periodo(l["data"], corte).to_numpy())
     por_ovt = e.resumo_por_ovt(l, extra=["ds", "proximidade", "dist_edl_m", "periodo"])
     return por_ovt[por_ovt["n_leituras"] >= minimo_leituras].reset_index(drop=True)
 

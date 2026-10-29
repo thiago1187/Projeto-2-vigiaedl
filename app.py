@@ -31,8 +31,9 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 
 # ----------------------------------------------------------------------------- dados
-@st.cache_data(show_spinner="Carregando os dados…")
+@st.cache_resource(show_spinner="Carregando os dados…")
 def carregar(pasta: str):
+    """cache_resource guarda o mesmo objeto para todos (sem cópia a cada clique). Por isso o app nunca altera estas tabelas."""
     leituras, ovt, edl, ds, rel = carregar_processados(pasta)
     instalacao = ler_instalacao_edl(pasta)
     leituras = esp.sinalizar_atipicos(leituras)
@@ -40,8 +41,8 @@ def carregar(pasta: str):
 
 
 @st.cache_data(show_spinner=False)
-def ovts_classificadas(_ovt, _edl, raio: float):
-    return an.classificar_ovts(_ovt, _edl, raio)
+def ovts_classificadas(_ovt, _edl, raio: float, _instalacao=None, chave_instalacao: int = 0):
+    return an.classificar_ovts(_ovt, _edl, raio, instalacao=_instalacao)
 
 
 @st.cache_data(show_spinner="Calculando o Kernel Density…")
@@ -99,11 +100,26 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**Antes × depois da instalação**")
-    corte_gevacz = esp.data_corte_padrao(instalacao["data_instalacao"]) if instalacao is not None and len(instalacao) else None
-    if corte_gevacz is not None:
-        st.caption(f"Data de corte informada pela GEVACZ: {corte_gevacz:%d/%m/%Y} (menor data de instalação).")
+    tem_instalacao = instalacao is not None and len(instalacao) > 0
+    corte_proprio = False
+    if tem_instalacao:
+        primeira = esp.data_corte_padrao(instalacao["data_instalacao"])
+        mediana_inst = pd.to_datetime(instalacao["data_instalacao"]).sort_values().iloc[len(instalacao) // 2]
+        st.caption(f"A GEVACZ informou a instalação de {len(instalacao)} EDLs, de {primeira:%d/%m/%Y} a "
+                   f"{instalacao['data_instalacao'].max():%d/%m/%Y}.")
         usar_corte = st.checkbox("Comparar antes × depois", value=True)
-        corte = st.date_input("Data de corte", value=corte_gevacz.date(), format="DD/MM/YYYY") if usar_corte else None
+        if usar_corte:
+            metodo = st.radio("Como definir antes e depois",
+                              ["Data da EDL de cada OVT (recomendado)", "Uma data única (menor data de instalação)"],
+                              help="Com a primeira opção, cada OVT perto de uma EDL usa a data de instalação dessa EDL. "
+                                   "As OVTs longe, que servem de comparação, usam a data abaixo. "
+                                   "A segunda opção é a regra do plano de trabalho.")
+            corte_proprio = metodo.startswith("Data da EDL")
+            padrao_corte = mediana_inst if corte_proprio else primeira
+            corte = st.date_input("Data de corte das OVTs longe" if corte_proprio else "Data de corte",
+                                  value=padrao_corte.date(), format="DD/MM/YYYY")
+        else:
+            corte = None
     else:
         st.caption("A GEVACZ ainda não informou a data de instalação das EDLs. Uma data escolhida aqui é só uma hipótese.")
         usar_corte = st.checkbox("Testar uma data de corte", value=False)
@@ -113,7 +129,7 @@ with st.sidebar:
 lf = an.filtrar_leituras(leituras, anos=anos, ciclos=ciclos, ds=ds_i)            # período + distrito
 lp = an.filtrar_leituras(leituras, anos=anos, ciclos=ciclos)                       # período, todos os distritos
 v = lf.dropna(subset=["n_ovos"])
-oc = ovts_classificadas(ovt, edl, float(raio))
+oc = ovts_classificadas(ovt, edl, float(raio), instalacao if tem_instalacao else None, len(instalacao) if tem_instalacao else 0)
 periodo_txt = "todos os anos" if anos is None else f"{anos}, ciclos {ciclos[0]} a {ciclos[1]}"
 
 c1, c2 = st.columns([3, 1])
@@ -219,6 +235,23 @@ with tab1:
         st.plotly_chart(fig, width="stretch")
         st.caption(f"Ano {ano_h}. O número depois do distrito é a média do ano.")
 
+        # ---- distritos lado a lado
+        st.markdown("**Distritos sanitários lado a lado**")
+        ind = esp.indicadores_por_regiao(lp, areas)
+        tds = pd.DataFrame({
+            "Distrito": [f"DS {int(i)}" for i in ind.index], "OVTs": ind["n_ovts"].astype(int),
+            "Ovos por OVT (média)": ind["ovos_por_ovt"], "Mediana": ind["mediana"],
+            "IDO (média das positivas)": ind["ido"], "IPO (% positivas)": ind["ipo"],
+            "OVTs por km²": ind["ovts_por_km2"], "Ovos por km² (por ciclo)": ind["ovos_por_km2"]})
+        def _realce(linha):
+            return ["background-color:#FEF3E7" if (ds_i is not None and linha["Distrito"] == f"DS {ds_i}") else "" for _ in linha]
+        st.dataframe(tds.style.apply(_realce, axis=1).format({
+            "Ovos por OVT (média)": "{:.1f}", "Mediana": "{:.0f}", "IDO (média das positivas)": "{:.1f}",
+            "IPO (% positivas)": "{:.1f}", "OVTs por km²": "{:.1f}", "Ovos por km² (por ciclo)": "{:.0f}"}),
+            width="stretch", hide_index=True)
+        st.caption("Ovos por km² sobe também onde há mais OVTs por km²; por isso os dois aparecem juntos. "
+                   "Para comparar distritos de tamanhos diferentes, o mais justo é ovos por OVT.")
+
         # ---- mapa
         st.markdown("---")
         st.markdown("### Mapa de OVTs, EDLs e hotspots")
@@ -237,7 +270,6 @@ with tab1:
             banda = kc[1].slider("Suavização (m)", 150, 800, 300, step=50)
             kc[2].caption("Nível de infestação não depende de quantas OVTs há no lugar. Concentração de ovos acende também onde há mais OVTs.")
             modo = "media" if modo_nome.startswith("Nível") else "soma"
-        ind = esp.indicadores_por_regiao(lp, areas)
         media_ovt = lp.dropna(subset=["n_ovos"]).groupby("id_ovt")["n_ovos"].mean()
         kde = calcular_kde(ovt, media_ovt, float(banda), modo) if mostrar_kde else None
         atip = set(lp.loc[lp["atipica"], "id_ovt"]) if "atipica" in lp else set()
@@ -338,7 +370,7 @@ with tab2:
         tab = pd.DataFrame({"Ano": ult["ano"].astype(int), "Ciclo": ult["ciclo"].astype(int),
                             "Coleta": ult["data"].dt.strftime("%d/%m/%Y"), "Ovos": ult["n_ovos"],
                             "Mediana do bairro": ult["mediana_bairro"].round(0), "Vezes a mediana": ult["vezes_mediana"].round(1),
-                            "Observação": ult["obs"].fillna("")})
+                            "Observação": ult["obs"].fillna("").astype(str).where(~ult["obs"].fillna("").astype(str).str.match(r"^\d{4}-\d{2}-\d{2}"), "")})
         est = (tab.style.apply(lambda r: ["background-color:#FEF3E7" if (pd.notna(r["Vezes a mediana"]) and r["Vezes a mediana"] >= 10) else "" for _ in r], axis=1)
                .format({"Ano": "{:d}", "Ciclo": "{:d}", "Ovos": "{:.0f}", "Mediana do bairro": "{:.0f}", "Vezes a mediana": "{:.1f}"}, na_rep="—"))
         st.dataframe(est, width="stretch", hide_index=True)
@@ -376,6 +408,24 @@ with tab3:
     st.plotly_chart(fig, width="stretch")
     st.caption(f"Média de ovos por OVT em cada ciclo, na mesma escala. A linha pontilhada é a média da cidade ({fmt(media_cidade, 1)}). O ponto marca o pico.")
 
+    # ------------------------------------------------------------------ ano a ano
+    anos_todos = sorted(int(a) for a in leituras["ano"].dropna().unique())
+    if len(anos_todos) > 1:
+        limite = min(int(leituras.loc[leituras["ano"] == a, "ciclo"].max()) for a in anos_todos)
+        aa = leituras[leituras["ciclo"] <= limite].dropna(subset=["n_ovos"])
+        pv = aa.pivot_table(index="ds", columns="ano", values="n_ovos", aggfunc="mean").sort_index()
+        st.markdown("**Ano a ano por distrito sanitário**")
+        fig = go.Figure(go.Heatmap(
+            z=pv.values, x=[str(c) for c in pv.columns], y=[f"DS {int(d)}" for d in pv.index],
+            colorscale=[[0, "#FDF0E3"], [0.5, "#E08A2E"], [1, "#7A3A0A"]], text=np.round(pv.values), texttemplate="%{text:.0f}",
+            hovertemplate="%{y} · %{x}: %{z:.1f} ovos por OVT<extra></extra>", xgap=2, ygap=2, colorbar=dict(title="ovos")))
+        layout(fig, 330, legenda=False)
+        fig.update_xaxes(type="category")
+        fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
+        st.caption(f"Média de ovos por OVT nos ciclos 1 a {limite} de cada ano. O limite é o do ano com menos ciclos, "
+                   "para comparar o mesmo período e não um ano inteiro com um ano pela metade.")
+
     # ------------------------------------------------------------------ eficácia
     st.markdown("---")
     st.markdown(f"### Eficácia das EDLs · perto × longe e antes × depois")
@@ -383,7 +433,7 @@ with tab3:
     base_leit = leituras if corte_ativo else lp                       # com corte, usa todos os anos
     if corte_ativo and anos is not None:
         st.caption("Com a data de corte ligada, a análise usa todos os anos, para ter leituras antes e depois.")
-    base = an.base_por_ovt(base_leit, oc, corte=corte, apenas_validadas=so_conferidas)
+    base = an.base_por_ovt(base_leit, oc, corte=corte, apenas_validadas=so_conferidas, corte_proprio=corte_proprio)
     base_f = base if ds_i is None else base[base["ds"] == ds_i]
     res = an.eficacia(base_f)
     geral = res["geral"]
@@ -418,7 +468,8 @@ with tab3:
             fig.update_layout(barmode="group")
             layout(fig, 260)
             st.plotly_chart(fig, width="stretch")
-            st.caption(f"Mediana de ovos por OVT. Corte em {corte:%d/%m/%Y}. A diferença das diferenças é {fmt(did['did'], 1)} ovos.")
+            regra = ("Perto: data da EDL de cada OVT. Longe" if corte_proprio else "Todas as OVTs") + f": corte em {corte:%d/%m/%Y}."
+            st.caption(f"Mediana de ovos por OVT. {regra} A diferença das diferenças é {fmt(did['did'], 1)} ovos.")
         else:
             st.markdown('<div class="cartao tracejado"><div class="rotulo">Aguardando dados</div><div class="grande" style="font-size:1.3rem">Sem corte de data</div>'
                         '<div class="nota">Precisa da data de instalação de cada EDL e de leituras de antes dela. '
@@ -490,13 +541,16 @@ with tab3:
         ("3. Leituras sem contagem", f"{fmt(sem_contagem)} leituras ({fmt(sem_contagem / len(leituras) * 100, 1)}%) não têm número de ovos. Principais motivos: "
                                      + ", ".join(f"{NOMES_OBS.get(k, k)} ({fmt(n)})" for k, n in cods.head(4).items()) + ". Elas não entram como zero."),
         ("4. Anos disponíveis", f"Há leituras de {anos_txt}. A GEVACZ ainda vai informar se existem dados de 2018 em diante; sem eles não há comparação de antes."),
-        ("5. Datas de instalação das EDLs", "Não vieram nos arquivos. Sem elas, o antes × depois só pode ser testado com uma data hipotética, e a comparação perto × longe é uma foto, não um efeito."),
-        ("6. Posição das OVTs", f"{fmt(nv)} OVTs do DS II tiveram o código reconstruído pela ordem do arquivo e a posição não pôde ser conferida; {fmt(rel.get('ovts_com_leitura_sem_ponto', 0))} OVTs com leitura não têm coordenada (a maioria são armadilhas antigas)."),
-        ("7. Raio de 200 m", "É o valor do plano de trabalho. A GEVACZ ainda não confirmou o raio real de influência de uma EDL."),
-        ("8. Cada ponto de EDL tem várias estações", "A distância é até o ponto cadastrado, não até cada estação. Não temos a posição individual de cada uma."),
+        ("5. Datas digitadas com ano errado", f"{fmt(rel.get('datas_corrigidas', 0))} leituras ({fmt(rel.get('datas_corrigidas', 0) / len(leituras) * 100, 1)}%) vieram com o ano da coleta digitado errado "
+                                              "(ex.: dezembro de 2024 escrito como 2025). Corrigimos pelo ciclo e guardamos a data original. Vale a GEVACZ conferir."),
+        ("6. Datas de instalação das EDLs", ("A GEVACZ informou datas para " + fmt(len(instalacao)) + " EDLs; as que ficaram sem data usam a data de corte das OVTs longe." if tem_instalacao
+                                              else "Não vieram nos arquivos. Sem elas, o antes × depois só pode ser testado com uma data hipotética, e a comparação perto × longe é uma foto, não um efeito.")),
+        ("7. Posição das OVTs", f"{fmt(nv)} OVTs do DS II tiveram o código reconstruído pela ordem do arquivo e a posição não pôde ser conferida; {fmt(rel.get('ovts_com_leitura_sem_ponto', 0))} OVTs com leitura não têm coordenada (a maioria são armadilhas antigas)."),
+        ("8. Raio de 200 m", "É o valor do plano de trabalho. A GEVACZ ainda não confirmou o raio real de influência de uma EDL."),
+        ("9. Cada ponto de EDL tem várias estações", "A distância é até o ponto cadastrado, não até cada estação. Não temos a posição individual de cada uma."),
     ]
-    cols = st.columns(4)
+    cols = st.columns(3)
     for i, (t_, x_) in enumerate(itens):
-        cols[i % 4].markdown(limitacao(t_, x_), unsafe_allow_html=True)
-        cols[i % 4].write("")
+        cols[i % 3].markdown(limitacao(t_, x_), unsafe_allow_html=True)
+        cols[i % 3].write("")
     st.caption("Fonte: monitoramento de ovitrampas da GEVACZ, tratado pelo pipeline do projeto (scripts/preparar_dados.py).")
