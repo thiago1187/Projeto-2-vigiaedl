@@ -1,0 +1,8 @@
+# Dados da GEVACZ não vão para o repositório (georreferenciados; ver README)
+data/raw/
+data/processed/
+*.rar
+__pycache__/
+.pytest_cache/
+.venv/
+.streamlit/secrets.toml
