@@ -36,7 +36,7 @@ def imagem_kde(grade: e.Grade, passo_graus: float = 0.0008, percentis=(2, 98)):
 def construir_mapa(ds_geo, metrica_ds: pd.Series, rotulo_metrica: str, ovt: pd.DataFrame,
                    media_ovt: pd.Series, edl: pd.DataFrame, raio_m: float, imagem=None, limites=None,
                    mostrar_ovt: bool = True, mostrar_edl: bool = True, mostrar_raio: bool = True,
-                   destaques: set | None = None) -> folium.Map:
+                   destaques: set | None = None, ids_ovt: set | None = None) -> folium.Map:
     # fit_bounds dispara com o iframe ainda sem altura e enquadra mal; centro e zoom fixos funcionam sempre.
     # Mapa-base do OpenStreetMap: o "cartodbpositron" passou a exigir chave de API.
     m = folium.Map(location=centro_do_mapa(ds_geo), zoom_start=ZOOM_RECIFE, tiles="OpenStreetMap", control_scale=True)
@@ -52,7 +52,7 @@ def construir_mapa(ds_geo, metrica_ds: pd.Series, rotulo_metrica: str, ovt: pd.D
             g[["ds", "nome", "valor", "texto", "geometry"]], name=f"Distritos · {rotulo_metrica}",
             style_function=lambda f: {
                 "fillColor": cmap(f["properties"]["valor"]) if f["properties"]["valor"] == f["properties"]["valor"] else "#eee",
-                "color": "#7A3A0A", "weight": 1.2, "fillOpacity": 0.45},
+                "color": "#7A3A0A", "weight": 1.2, "fillOpacity": 0.15 if imagem is not None else 0.45},
             tooltip=folium.GeoJsonTooltip(fields=["nome", "texto"], aliases=["Distrito", rotulo_metrica]),
         ).add_to(m)
         cmap.caption = rotulo_metrica
@@ -65,12 +65,14 @@ def construir_mapa(ds_geo, metrica_ds: pd.Series, rotulo_metrica: str, ovt: pd.D
     if mostrar_ovt:
         camada = folium.FeatureGroup(name="OVTs", show=True)
         for r in ovt.itertuples():
+            if ids_ovt is not None and r.id_ovt not in ids_ovt:
+                continue
             v = media_ovt.get(r.id_ovt, np.nan)
             cor = "#9CA3AF" if v != v else CORES_CALOR[classe_calor(v)]
             alerta = destaques is not None and r.id_ovt in destaques
             folium.CircleMarker(
                 (r.lat, r.lon), radius=5 if alerta else 3, color="#7A0000" if alerta else "#374151",
-                weight=2 if alerta else 0.4, fill=True, fill_color=cor, fill_opacity=0.9,
+                weight=2 if alerta else 0.3, fill=True, fill_color=cor, fill_opacity=0.9,
                 tooltip=f"{r.id_ovt} · {r.bairro} · {fmt(v)} ovos por leitura" if v == v else f"{r.id_ovt} · {r.bairro} · sem leitura no período",
             ).add_to(camada)
         camada.add_to(m)

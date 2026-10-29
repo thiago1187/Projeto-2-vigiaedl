@@ -419,9 +419,11 @@ with tab1:
                     "Ovos por km² (por ciclo)": "ovos_por_km2", "OVTs por km²": "ovts_por_km2"}
         nome_m = mc[0].selectbox("Colorir os distritos por", list(metricas))
         mostrar_kde = mc[1].checkbox("Kernel Density", value=True)
-        mostrar_ovt = mc[2].checkbox("OVTs", value=True)
+        modo_ovt = mc[2].selectbox("Pontos das OVTs", ["Só hotspots e fora do padrão", "Todas", "Nenhuma"],
+                                   help="Com todas as OVTs, o mapa fica carregado. O padrão mostra só as que merecem atenção.")
+        mostrar_ovt = modo_ovt != "Nenhuma"
         mostrar_edl = mc[3].checkbox("EDLs", value=True)
-        mostrar_raio = mc[4].checkbox("Raio das EDLs", value=True)
+        mostrar_raio = mc[4].checkbox("Raio das EDLs", value=False)
         if mostrar_kde:
             kc = st.columns([1.3, 1, 2])
             modo_nome = kc[0].selectbox("O Kernel Density mostra", ["Nível de infestação (média de ovos por OVT)",
@@ -432,14 +434,20 @@ with tab1:
         media_ovt = lp.dropna(subset=["n_ovos"]).groupby("id_ovt")["n_ovos"].mean()
         kde = calcular_kde(ovt, media_ovt, float(banda), modo) if mostrar_kde else None
         atip = set(lp.loc[lp["atipica"], "id_ovt"]) if "atipica" in lp else set()
+        ids_ovt = None
+        if modo_ovt.startswith("Só"):
+            if kde:
+                ids_ovt = set(kde["pontos"].loc[kde["pontos"]["kde"] >= kde["limiar"], "id_ovt"]) | atip
+            else:
+                ids_ovt = set(media_ovt[media_ovt >= media_ovt.quantile(0.9)].index) | atip
         mapa = construir_mapa(ds_geo, ind[metricas[nome_m]], nome_m, ovt, media_ovt, edl, float(raio),
                               imagem=kde["rgba"] if kde else None, limites=kde["limites"] if kde else None,
-                              mostrar_ovt=mostrar_ovt, mostrar_edl=mostrar_edl, mostrar_raio=mostrar_raio, destaques=atip)
+                              mostrar_ovt=mostrar_ovt, mostrar_edl=mostrar_edl, mostrar_raio=mostrar_raio, destaques=atip, ids_ovt=ids_ovt)
         centro = centro_do_mapa(ds_geo)
         st_folium(mapa, height=640, use_container_width=True, returned_objects=[], key="mapa_geral",
                   center=centro, zoom=ZOOM_RECIFE)
         st.markdown(legenda_calor_html(), unsafe_allow_html=True)
-        st.caption("Pontos com borda vermelha têm alguma leitura 10 vezes acima da mediana do bairro: vale conferir antes de tratar como foco.")
+        st.caption("Pontos com borda vermelha têm alguma leitura 10 vezes acima da mediana do bairro: vale conferir antes de tratar como foco. Para ver todas as OVTs, troque \"Pontos das OVTs\".")
 
         if kde:
             pts = kde["pontos"]
@@ -450,7 +458,9 @@ with tab1:
                   .rename("OVTs em hotspot").to_frame())
             tq["% das OVTs do distrito"] = (tq["OVTs em hotspot"] / pts.groupby("ds").size().reindex(tq.index) * 100).round(1).astype(float)
             tq.index = [f"DS {i}" for i in tq.index]
-            st.dataframe(tq.T.style.format(lambda x: fmt(x, 1) if isinstance(x, float) else fmt(x)), width="stretch")
+            tq_txt = pd.DataFrame({"OVTs em hotspot": tq["OVTs em hotspot"].map(lambda x: fmt(int(x))),
+                                   "% das OVTs do distrito": tq["% das OVTs do distrito"].map(lambda x: fmt(x, 1))})
+            st.dataframe(tq_txt.T, width="stretch")
 
         # ---- distribuição e concentração
         st.markdown("---")
