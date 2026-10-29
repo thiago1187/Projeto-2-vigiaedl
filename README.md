@@ -8,9 +8,20 @@ Funcionando com os dados de 2024 a 2026, sempre organizado por Distrito Sanitár
 
 ## As três telas
 
-- **Visão geral:** ovos por OVT em cada ciclo, ranking de bairros, mapa de calor distrito × ciclo, e mapa com OVTs, EDLs (com raio), distritos e Kernel Density.
-- **Ficha da OVT:** histórico de uma armadilha comparado com a mediana do bairro, alerta de padrão fora do comum, últimas leituras e exportação em CSV.
-- **Histórico e eficácia:** evolução por distrito sanitário, perto × longe da EDL, faixas de distância, antes × depois, texto-resumo e as limitações dos dados.
+Cada tela abre com a faixa de recorte (o que está filtrado) e um índice de seções. Cada seção começa com um texto curto de leitura, calculado dos dados, e depois vêm os gráficos.
+
+- **Visão geral:** leitura rápida; ovos por OVT em cada ciclo; bairros mais altos; mapa de calor distrito × ciclo; tabela dos distritos lado a lado; **rankings por distrito** (top 10 de bairros e de OVTs, com seletor de DS); ovos por área (por km² e nível × cobertura de OVTs); mapa com OVTs, EDLs (com raio), distritos e Kernel Density; distribuição dos ovos e curva de concentração.
+- **Ficha da OVT:** atalhos para os casos mais fora do padrão (incluindo a BVG6043 do plano); histórico da armadilha contra a mediana do bairro; últimas leituras e CSV; ranking das OVTs que mais fogem do padrão e o quanto isso mexe na média do distrito.
+- **Histórico e eficácia:** evolução por distrito na mesma escala; ano a ano e sazonalidade; focos que se repetem; perto × longe (geral, por faixa de distância, por distrito com intervalo, dentro do mesmo bairro) e antes × depois; prazos do dado; cuidados com os dados.
+
+Cada tela tem um quadro "Por que escolhemos esses gráficos" com a pergunta, o gráfico e o motivo, pensado para a apresentação.
+
+## Decisões de visualização
+
+- Cor tem função fixa: laranja é ovo e infestação, azul é EDL e comparação, vermelho é "fora do padrão, conferir", cinza é referência. Nada depende só da cor: os valores aparecem escritos nas células e nas barras (item de acessibilidade do backlog).
+- Nada de eixo duplo. Quando duas medidas têm escala diferente, viram dois gráficos (ex.: ovos por km² e ovos por OVT).
+- Os textos de leitura saem de funções em `core/insights.py` (com testes). Se entrar outro ano ou outro filtro, o texto muda junto.
+- Intervalos de 95% por bootstrap nas diferenças perto × longe, para não se apoiar num p-valor isolado.
 
 ## Como rodar
 
@@ -74,6 +85,7 @@ app.py                  painel (3 telas)
 core/dados.py           leitura e limpeza dos arquivos da GEVACZ
 core/espacial.py        distância, perto/longe, antes/depois, estatística, Kernel Density
 core/analise.py         junta leituras, OVTs e EDLs
+core/insights.py        cálculos e textos de leitura dos gráficos de análise
 core/mapa.py, visual.py mapa e estilo
 scripts/preparar_dados.py
 tests/                  testes das regras de negócio

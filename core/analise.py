@@ -68,6 +68,8 @@ def base_por_ovt(leituras: pd.DataFrame, ovt_class: pd.DataFrame, corte=None,
     else:
         l = l.assign(periodo=e.classificar_periodo(l["data"], corte).to_numpy())
     por_ovt = e.resumo_por_ovt(l, extra=["ds", "proximidade", "dist_edl_m", "periodo"])
+    if "bairro" in leituras:
+        por_ovt["bairro"] = por_ovt["id_ovt"].map(leituras.dropna(subset=["bairro"]).groupby("id_ovt")["bairro"].last())
     return por_ovt[por_ovt["n_leituras"] >= minimo_leituras].reset_index(drop=True)
 
 
