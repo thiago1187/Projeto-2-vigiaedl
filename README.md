@@ -19,6 +19,7 @@ Cada tela tem um quadro "Por que escolhemos esses gráficos" com a pergunta, o g
 ## Decisões de visualização
 
 - Cor tem função fixa: laranja é ovo e infestação, azul é EDL e comparação, vermelho é "fora do padrão, conferir", cinza é referência. Nada depende só da cor: os valores aparecem escritos nas células e nas barras (item de acessibilidade do backlog).
+- O mapa pinta o Kernel Density em 5 faixas de cor (as mesmas do resto do painel), com legenda, contorno do hotspot e fundo em cinza. Os pontos de OVT começam desligados, porque três mil pontos em cima da mancha escondem a informação.
 - Nada de eixo duplo. Quando duas medidas têm escala diferente, viram dois gráficos (ex.: ovos por km² e ovos por OVT).
 - Os textos de leitura saem de funções em `core/insights.py` (com testes). Se entrar outro ano ou outro filtro, o texto muda junto.
 - Intervalos de 95% por bootstrap nas diferenças perto × longe, para não se apoiar num p-valor isolado.

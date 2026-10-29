@@ -22,7 +22,8 @@ from core import analise as an
 from core import espacial as esp
 from core import insights as ins
 from core.dados import carregar_processados, ler_instalacao_edl
-from core.mapa import ZOOM_RECIFE, centro_do_mapa, construir_mapa, imagem_kde, legenda_calor_html
+from core.mapa import (ZOOM_RECIFE, camadas_do_calor, centro_do_mapa, construir_mapa, legenda_do_mapa_html,
+                       legenda_gradiente_html)
 from core.visual import (AZUL, CINZA, CORES_CALOR, CSS, LARANJA, QUEBRAS, TINTA, cartao, fmt, leitura, limitacao,
                          CONFIG_GRAFICO, LEGENDA_CORES_HTML, faixa_de_filtros, indice)
 
@@ -49,16 +50,16 @@ def ovts_classificadas(_ovt, _edl, raio: float, _instalacao=None, chave_instalac
 
 
 @st.cache_data(show_spinner="Calculando o Kernel Density…")
-def calcular_kde(_ovt, media_por_ovt: pd.Series, banda: float, modo: str):
+def calcular_kde(_ovt, _ds_geo, media_por_ovt: pd.Series, banda: float, modo: str):
     d = _ovt.merge(media_por_ovt.rename("media"), left_on="id_ovt", right_index=True)
     d = d.dropna(subset=["media", "x", "y"])
     if len(d) < 10:
         return None
-    g = esp.kde_grade(d["x"], d["y"], d["media"], banda_m=banda, celula_m=max(50.0, banda / 4), modo=modo)
+    g = esp.kde_grade(d["x"], d["y"], d["media"], banda_m=banda, celula_m=max(60.0, banda / 4), modo=modo)
     d["kde"] = esp.kde_nos_pontos(g, d["x"], d["y"])
-    limiar = esp.limiar_hotspot(g, 90)
-    rgba, lim = imagem_kde(g)
-    return {"rgba": rgba, "limites": lim, "limiar": limiar, "pontos": d[["id_ovt", "ds", "bairro", "kde"]]}
+    calor = camadas_do_calor(g, modo, recorte=_ds_geo.geometry.union_all())
+    calor["pontos"] = d[["id_ovt", "ds", "bairro", "kde"]]
+    return calor
 
 
 @st.cache_data(show_spinner="Calculando os focos que se repetem…")
@@ -414,40 +415,55 @@ with tab1:
         # ---- mapa
         st.markdown("---")
         st.subheader("Mapa de OVTs, EDLs e hotspots", anchor="mapa")
-        mc = st.columns([1.3, 1, 1, 1, 1])
+        st.caption("Cada cor é o nível de infestação estimado em volta daquele ponto, a partir das OVTs vizinhas (Kernel Density). "
+                   "Não é a leitura de uma OVT só: a mancha suaviza as vizinhas para mostrar regiões.")
+        mc = st.columns([1.2, 1.5, 1, 1, 1])
+        pintar = mc[0].radio("Pintar o mapa por", ["Calor (Kernel Density)", "Distritos"], help="Calor mostra regiões, ignorando a divisão em distritos. Distritos pinta cada distrito com um valor só.")
         metricas = {"Ovos por OVT": "ovos_por_ovt", "IDO (média das OVTs positivas)": "ido",
                     "Ovos por km² (por ciclo)": "ovos_por_km2", "OVTs por km²": "ovts_por_km2"}
-        nome_m = mc[0].selectbox("Colorir os distritos por", list(metricas))
-        mostrar_kde = mc[1].checkbox("Kernel Density", value=True)
-        modo_ovt = mc[2].selectbox("Pontos das OVTs", ["Só hotspots e fora do padrão", "Todas", "Nenhuma"],
-                                   help="Com todas as OVTs, o mapa fica carregado. O padrão mostra só as que merecem atenção.")
-        mostrar_ovt = modo_ovt != "Nenhuma"
-        mostrar_edl = mc[3].checkbox("EDLs", value=True)
-        mostrar_raio = mc[4].checkbox("Raio das EDLs", value=False)
-        if mostrar_kde:
-            kc = st.columns([1.3, 1, 2])
-            modo_nome = kc[0].selectbox("O Kernel Density mostra", ["Nível de infestação (média de ovos por OVT)",
-                                                                  "Onde os ovos se concentram (ovos por km²)"])
-            banda = kc[1].slider("Suavização (m)", 150, 800, 300, step=50)
-            kc[2].caption("Nível de infestação não depende de quantas OVTs há no lugar. Concentração de ovos acende também onde há mais OVTs.")
+        calor_on = pintar.startswith("Calor")
+        banda, modo = 500, "media"
+        if calor_on:
+            modo_nome = mc[1].selectbox("O calor mostra", ["Nível de infestação (média de ovos por OVT)", "Onde os ovos se concentram (ovos por km²)"],
+                                        help="Nível de infestação não depende de quantas OVTs há no lugar. Concentração acende também onde há mais OVTs.")
             modo = "media" if modo_nome.startswith("Nível") else "soma"
+            banda = mc[2].slider("Suavização (m)", 150, 800, 500, step=50, help="Quanto maior, mais liso e regional. Quanto menor, mais detalhe de rua.")
+            nome_m = "Ovos por OVT"
+        else:
+            nome_m = mc[1].selectbox("Colorir os distritos por", list(metricas))
+        modo_ovt = mc[3].selectbox("Pontos das OVTs", ["Nenhuma", "Só fora do padrão", "Só hotspots", "Todas"],
+                                   help="Com todas as OVTs o mapa fica carregado. Comece sem elas.")
+        oc2 = st.columns(4)
+        mostrar_edl = oc2[0].checkbox("Mostrar EDLs", value=True)
+        mostrar_raio = oc2[1].checkbox("Raio das EDLs", value=False)
         media_ovt = lp.dropna(subset=["n_ovos"]).groupby("id_ovt")["n_ovos"].mean()
-        kde = calcular_kde(ovt, media_ovt, float(banda), modo) if mostrar_kde else None
+        kde = calcular_kde(ovt, ds_geo, media_ovt, float(banda), modo) if calor_on else None
         atip = set(lp.loc[lp["atipica"], "id_ovt"]) if "atipica" in lp else set()
         ids_ovt = None
-        if modo_ovt.startswith("Só"):
+        if modo_ovt == "Todas":
+            ids_ovt = set(ovt["id_ovt"])
+        elif modo_ovt == "Só fora do padrão":
+            ids_ovt = set(atip)
+        elif modo_ovt == "Só hotspots":
             if kde:
-                ids_ovt = set(kde["pontos"].loc[kde["pontos"]["kde"] >= kde["limiar"], "id_ovt"]) | atip
+                ids_ovt = set(kde["pontos"].loc[kde["pontos"]["kde"] >= kde["limiar"], "id_ovt"])
             else:
-                ids_ovt = set(media_ovt[media_ovt >= media_ovt.quantile(0.9)].index) | atip
-        mapa = construir_mapa(ds_geo, ind[metricas[nome_m]], nome_m, ovt, media_ovt, edl, float(raio),
-                              imagem=kde["rgba"] if kde else None, limites=kde["limites"] if kde else None,
-                              mostrar_ovt=mostrar_ovt, mostrar_edl=mostrar_edl, mostrar_raio=mostrar_raio, destaques=atip, ids_ovt=ids_ovt)
+                ids_ovt = set(media_ovt[media_ovt >= media_ovt.quantile(0.9)].index)
+        if calor_on and kde:
+            st.markdown(legenda_do_mapa_html("Nível de infestação" + (" · ovos por OVT" if modo == "media" else " · ovos por km² (suavizado)"),
+                                             kde["cores"], kde["rotulos"], hotspot=bool(kde["hotspot"]), edl=mostrar_edl,
+                                             ovt={"Todas": "OVT", "Só hotspots": "OVT em hotspot"}.get(modo_ovt, ""),
+                                             alerta=modo_ovt != "Nenhuma"), unsafe_allow_html=True)
+        elif not calor_on:
+            vv = ind[metricas[nome_m]].dropna()
+            st.markdown(legenda_gradiente_html(f"{nome_m}, por distrito", float(vv.min()), float(vv.max())), unsafe_allow_html=True)
+        mapa = construir_mapa(ds_geo, ind[metricas[nome_m]], nome_m, ovt, media_ovt, edl, float(raio), calor=kde,
+                              pintar_distritos=not calor_on, mostrar_edl=mostrar_edl, mostrar_raio=mostrar_raio,
+                              ids_ovt=ids_ovt, destaques=atip)
         centro = centro_do_mapa(ds_geo)
         st_folium(mapa, height=640, use_container_width=True, returned_objects=[], key="mapa_geral",
                   center=centro, zoom=ZOOM_RECIFE)
-        st.markdown(legenda_calor_html(), unsafe_allow_html=True)
-        st.caption("Pontos com borda vermelha têm alguma leitura 10 vezes acima da mediana do bairro: vale conferir antes de tratar como foco. Para ver todas as OVTs, troque \"Pontos das OVTs\".")
+        st.caption("Passe o mouse num distrito para ver o valor. Arraste para mover e use os botões + e − para o zoom.")
 
         if kde:
             pts = kde["pontos"]

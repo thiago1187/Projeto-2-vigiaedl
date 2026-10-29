@@ -240,3 +240,23 @@ def test_grade_para_latlon_mantem_a_posicao():
     lat_pico = lat1 - (i + 0.5) * (lat1 - lat0) / img.shape[0]     # a linha 0 é o norte
     lon_pico = lon0 + (j + 0.5) * (lon1 - lon0) / img.shape[1]
     assert abs(lat_pico - lat) < 0.002 and abs(lon_pico - lon) < 0.002   # ~200 m
+
+
+def test_poligonos_de_nivel_cobre_so_o_pico_e_respeita_buracos():
+    import numpy as np
+    from shapely.geometry import Point
+    xs = np.arange(0, 3000, 100.0)
+    X, Y = np.meshgrid(xs, xs)
+    z = np.exp(-(((X - 1500) ** 2 + (Y - 1500) ** 2) / (2 * 500 ** 2))) * 100
+    g = e.Grade(valores=z, x0=0.0, y0=0.0, celula_m=100.0)
+    alto = e.poligonos_de_nivel(g, 60, np.inf)
+    baixo = e.poligonos_de_nivel(g, -np.inf, 60)
+    assert not alto.is_empty and not baixo.is_empty
+    assert alto.area < baixo.area                      # o pico é menor que o resto
+    assert alto.area > 0 and abs(alto.area + baixo.area - e.poligonos_de_nivel(g, -np.inf, np.inf).area) < 1e-12 + 1e-6 * baixo.area
+
+
+def test_poligonos_de_nivel_sem_valor_valido_devolve_vazio():
+    import numpy as np
+    g = e.Grade(valores=np.full((5, 5), np.nan), x0=0.0, y0=0.0, celula_m=100.0)
+    assert e.poligonos_de_nivel(g, 0, 1).is_empty

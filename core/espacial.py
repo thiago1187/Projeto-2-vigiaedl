@@ -325,3 +325,37 @@ def grade_para_latlon(grade: Grade, passo_graus: float = 0.0008, crs_metros: int
     f = RegularGridInterpolator((ys, xs), grade.valores, bounds_error=False, fill_value=np.nan)
     img = f(np.column_stack([Y.ravel(), X.ravel()])).reshape(LON.shape)
     return img[::-1], (lat_min, lon_min, lat_max, lon_max)
+
+
+def poligonos_de_nivel(grade: Grade, inferior: float, superior: float, crs_metros: int = 31985):
+    """Região da grade com valor entre `inferior` e `superior`, como polígono em lat/lon (EPSG:4326).
+
+    Usa curvas de nível (contourpy), então a borda sai lisa e vetorial, sem os quadradinhos de uma imagem.
+    Células sem suporte (NaN) ficam de fora. Devolve uma geometria do shapely (possivelmente vazia).
+    """
+    from contourpy import FillType, contour_generator
+    from pyproj import Transformer
+    from shapely.geometry import Polygon
+    from shapely.ops import transform, unary_union
+
+    z = np.ma.masked_invalid(grade.valores)
+    if z.mask.all():
+        return Polygon()
+    gen = contour_generator(x=grade.xs, y=grade.ys, z=z, fill_type=FillType.ChunkCombinedOffsetOffset)
+    inf_, sup_ = (-1e18 if not np.isfinite(inferior) else inferior), (1e18 if not np.isfinite(superior) else superior)
+    pts, offs, outer = gen.filled(inf_, sup_)
+    polys = []
+    for P, O, OO in zip(pts, offs, outer):
+        if P is None:
+            continue
+        aneis = [P[O[i]:O[i + 1]] for i in range(len(O) - 1)]
+        for a, b in zip(OO[:-1], OO[1:]):
+            r = aneis[a:b]
+            if len(r[0]) >= 4:
+                pol = Polygon(r[0], [h for h in r[1:] if len(h) >= 4])
+                polys.append(pol if pol.is_valid else pol.buffer(0))
+    if not polys:
+        return Polygon()
+    geom = unary_union(polys)
+    para_graus = Transformer.from_crs(crs_metros, 4326, always_xy=True)
+    return transform(para_graus.transform, geom)
